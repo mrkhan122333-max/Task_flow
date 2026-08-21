@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Team - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('main.project_list') }}">Projects</a> / {{ project.name }}</div>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{{ project.name }}</h1>
+    </div>
+</div>
+{% set active = 'team' %}
+{% include "projects/_subnav.html" %}
+
+<div class="grid-2">
+    <div>
+        <div class="card">
+            <h3 style="margin-top:0;">Members ({{ project.members|length }})</h3>
+            {% for member in project.members %}
+            {% set member_role = roles_by_user_id.get(member.id, member.role) %}
+            <div class="member-row">
+                <div class="member-info">
+                    <div class="avatar-sm">{{ member.name[:2]|upper }}</div>
+                    <div>
+                        <div class="member-name">{{ member.name }}{% if member.id == current_user.id %} (you){% endif %}</div>
+                        <div class="member-email">{{ member.email }}</div>
+                    </div>
+                </div>
+                <span class="role-badge role-{{ member_role }}">{{ member_role }}</span>
+
+                {% if member.id != current_user.id %}
+                    {% if current_user.is_admin and member_role == 'analyst' %}
+                    <a href="{{ url_for('messaging.thread', project_id=project.id, user_id=member.id) }}"
+                       class="btn btn-secondary btn-sm">Message</a>
+                    {% elif not current_user.is_admin and member_role == 'admin' %}
+                    <a href="{{ url_for('messaging.thread', project_id=project.id, user_id=member.id) }}"
+                       class="btn btn-secondary btn-sm">Message</a>
+                    {% endif %}
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {% if current_user.is_admin %}
+    <div>
+        <div class="card">
+            <h3 style="margin-top:0;">Invite someone</h3>
+            <form method="POST" action="{{ url_for('invites.invite_create', project_id=project.id) }}">
+                <div class="invite-form-row">
+                    <input class="form-input" type="email" name="email" placeholder="name@gmail.com" required>
+                    <select class="form-select" name="role">
+                        {% for r in valid_roles %}
+                        <option value="{{ r }}" {% if r == 'analyst' %}selected{% endif %}>{{ r|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn" type="submit">Send invite</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+            <h3 style="margin-top:0;">Invites</h3>
+            {% for invite in invites %}
+            <div class="member-row">
+                <div class="member-info">
+                    <div>
+                        <div class="member-name">{{ invite.email }}</div>
+                        <div class="member-email">
+                            Invited as {{ invite.role }} by {{ invite.invited_by.name }} ·
+                            {{ invite.created_at.strftime('%d %b %Y') }}
+                        </div>
+                    </div>
+                </div>
+                <span class="invite-status invite-status-{{ invite.status }}">{{ invite.status }}</span>
+                {% if invite.status != 'accepted' %}
+                <form class="inline-form" method="POST"
+                      action="{{ url_for('invites.invite_resend', project_id=project.id, invite_id=invite.id) }}">
+                    <button class="btn btn-secondary btn-sm" type="submit">Resend</button>
+                </form>
+                <form class="inline-form" method="POST"
+                      action="{{ url_for('invites.invite_cancel', project_id=project.id, invite_id=invite.id) }}"
+                      onsubmit="return confirm('Cancel this invite?');">
+                    <button class="btn btn-secondary btn-sm" type="submit">Cancel</button>
+                </form>
+                {% endif %}
+            </div>
+            {% else %}
+            <p style="color:var(--text-muted); font-size:13px;">No invites sent yet.</p>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

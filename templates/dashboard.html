@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Home - TaskFlow{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Good day, {{ current_user.name.split(' ')[0] }}</h1>
+        <div class="page-subtitle">Here's what's on your plate</div>
+    </div>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('main.project_new') }}" class="btn">+ New project</a>
+    {% endif %}
+</div>
+
+<div class="stat-row">
+    <div class="stat-box">
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-label">My tasks</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-value">{{ stats.complete }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-value">{{ stats.overdue }}</div>
+        <div class="stat-label">Overdue</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <h3 style="margin-top:0;">My tasks</h3>
+        {% if my_tasks %}
+        <table>
+            <thead><tr><th>Task</th><th>Project</th><th>Due</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for task in my_tasks %}
+                <tr>
+                    <td><a href="{{ url_for('main.task_detail', task_id=task.id) }}">{{ task.title }}</a></td>
+                    <td>{{ task.project.name }}</td>
+                    <td>
+                        {% if task.due_date %}
+                        {% set urgency = task.due_urgency() %}
+                        <span class="badge {% if urgency %}due-{{ urgency }}{% endif %}">
+                            {{ task.due_date.strftime('%d %b') }}
+                        </span>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ task.status }}">{{ STATUS_LABELS[task.status] }}</span>
+                        {% if task.is_overdue() %}<span class="badge badge-overdue">overdue</span>{% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">✓</div>
+            No tasks assigned to you yet.
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3 style="margin-top:0;">Projects</h3>
+        {% if projects %}
+            {% for p in projects %}
+            <a href="{{ url_for('main.project_board', project_id=p.id) }}" style="display:block; padding:10px 0; border-bottom:1px solid var(--border);">
+                <strong>{{ p.name }}</strong>
+                <div class="progress-bar" style="margin-top:6px;">
+                    <div class="progress-fill" style="width:{{ p.progress_percent() }}%;"></div>
+                </div>
+            </a>
+            {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">▤</div>
+            No projects yet.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

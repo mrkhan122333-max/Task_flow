@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TaskFlow{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+{% if current_user.is_authenticated %}
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-top">
+            <a href="{{ url_for('main.dashboard') }}" class="brand">
+                <span class="brand-mark">◆</span> TaskFlow
+            </a>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('main.dashboard') }}"
+               class="nav-item {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
+                <span class="nav-icon">⌂</span> Home
+            </a>
+            <a href="{{ url_for('main.project_list') }}"
+               class="nav-item {% if request.endpoint and request.endpoint.startswith('main.project') %}active{% endif %}">
+                <span class="nav-icon">▤</span> Projects
+            </a>
+            {% if current_user.is_admin %}
+            <a href="{{ url_for('main.manage_users') }}"
+               class="nav-item {% if request.endpoint == 'main.manage_users' %}active{% endif %}">
+                <span class="nav-icon">☺</span> People
+            </a>
+            <a href="{{ url_for('analytics.admin_dashboard') }}"
+               class="nav-item {% if request.endpoint and request.endpoint.startswith('analytics.') %}active{% endif %}">
+                <span class="nav-icon">▲</span> Analytics
+            </a>
+            {% endif %}
+        </nav>
+
+        {% if current_user.is_admin %}
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">
+                Quick actions
+                <a href="{{ url_for('main.project_new') }}" class="sidebar-add" title="New project">+</a>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="sidebar-bottom">
+            <div class="role-badge role-{{ current_user.role }}">{{ current_user.role }}</div>
+            <div class="user-chip">
+                <div class="avatar">{{ current_user.name[:2]|upper }}</div>
+                <div class="user-chip-text">
+                    <div class="user-chip-name">{{ current_user.name }}</div>
+                    <div class="user-chip-email">{{ current_user.email }}</div>
+                </div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="logout-link">Log out</a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-stack">
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
+{% else %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-stack flash-stack-centered">
+                {% for category, message in messages %}
+                    <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+    {% block auth_content %}{% endblock %}
+{% endif %}
+</body>
+</html>

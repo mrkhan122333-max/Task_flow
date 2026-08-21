@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}New project - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('main.project_list') }}">Projects</a> / New</div>
+<h1 class="page-title">New project</h1>
+
+<div class="card" style="max-width:520px;">
+    <form method="POST">
+        <div class="form-group">
+            <label class="form-label">Project name</label>
+            <input class="form-input" type="text" name="name" required autofocus>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" name="description"></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Add members</label>
+            <div class="checkbox-list">
+                {% for u in users %}
+                <label class="checkbox-row">
+                    <input type="checkbox" name="member_ids" value="{{ u.id }}">
+                    {{ u.name }} <span style="color:var(--text-muted);">({{ u.email }})</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <button class="btn" type="submit">Create project</button>
+    </form>
+</div>
+{% endblock %}

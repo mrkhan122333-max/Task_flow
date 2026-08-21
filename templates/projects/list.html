@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Projects - TaskFlow{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Projects</h1>
+    </div>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('main.project_new') }}" class="btn">+ New project</a>
+    {% endif %}
+</div>
+
+{% if projects %}
+<div class="project-grid">
+    {% for p in projects %}
+    <a href="{{ url_for('main.project_board', project_id=p.id) }}" class="project-card">
+        <div class="project-card-title">{{ p.name }}</div>
+        <div style="color:var(--text-muted); font-size:12px;">{{ p.tasks|length }} tasks &middot; {{ p.members|length }} members</div>
+        <div class="progress-bar"><div class="progress-fill" style="width:{{ p.progress_percent() }}%;"></div></div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">▤</div>
+    No projects yet.{% if current_user.is_admin %} <a href="{{ url_for('main.project_new') }}">Create one</a>.{% endif %}
+</div>
+{% endif %}
+{% endblock %}

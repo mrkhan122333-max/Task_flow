@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ other_user.name }} · {{ project.name }} - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="{{ url_for('main.project_list') }}">Projects</a> /
+    <a href="{{ url_for('main.project_board', project_id=project.id) }}">{{ project.name }}</a> /
+    <a href="{{ url_for('messaging.inbox', project_id=project.id) }}">Messages</a>
+</div>
+<div class="page-header">
+    <div style="display:flex; align-items:center; gap:10px;">
+        <div class="avatar-sm">{{ other_user.name[:2]|upper }}</div>
+        <div>
+            <h1 class="page-title" style="font-size:20px;">{{ other_user.name }}</h1>
+            <div class="page-subtitle" style="margin-top:0;">{{ other_user.role|capitalize }} on {{ project.name }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="message-thread" id="message-thread">
+        {% for m in messages %}
+        <div class="message-bubble-row {% if m.sender_id == current_user.id %}mine{% endif %}">
+            <div>
+                <div class="message-bubble">{{ m.content }}</div>
+                <div class="message-meta">{{ m.created_at.strftime('%d %b, %H:%M') }}</div>
+            </div>
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted); font-size:13px;">No messages yet. Say hello 👋</p>
+        {% endfor %}
+    </div>
+
+    <form method="POST" action="{{ url_for('messaging.thread', project_id=project.id, user_id=other_user.id) }}"
+          class="message-compose">
+        <textarea name="content" placeholder="Write a message..." required maxlength="4000"></textarea>
+        <button class="btn" type="submit">Send</button>
+    </form>
+</div>
+
+<script>
+    // Keep the thread scrolled to the latest message on load.
+    var threadEl = document.getElementById("message-thread");
+    if (threadEl) { threadEl.scrollTop = threadEl.scrollHeight; }
+</script>
+{% endblock %}

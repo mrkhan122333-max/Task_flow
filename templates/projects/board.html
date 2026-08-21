@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('main.project_list') }}">Projects</a> / {{ project.name }}</div>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{{ project.name }}</h1>
+        {% if project.description %}<div class="page-subtitle">{{ project.description }}</div>{% endif %}
+    </div>
+    <div style="display:flex; gap:8px;">
+        {% if current_user.is_admin %}
+        <a href="{{ url_for('main.task_new', project_id=project.id) }}" class="btn">+ Add task</a>
+        <form class="inline-form" method="POST" action="{{ url_for('main.project_delete', project_id=project.id) }}"
+              onsubmit="return confirm('Delete this project and all its tasks?');">
+            <button class="btn btn-secondary" type="submit">Delete project</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% set active = 'board' %}
+{% include "projects/_subnav.html" %}
+
+<div class="board">
+    {% for status, tasks in columns.items() %}
+    <div class="board-column">
+        <div class="board-column-title">
+            <span>{{ STATUS_LABELS[status] }}</span>
+            <span>{{ tasks|length }}</span>
+        </div>
+        {% for task in tasks %}
+        <a href="{{ url_for('main.task_detail', task_id=task.id) }}" class="task-card" style="display:block;">
+            <div class="task-card-title">{{ task.title }}</div>
+            <div class="task-card-meta">
+                <span class="badge badge-{{ task.priority }}">{{ task.priority }}</span>
+                {% if task.due_date %}
+                {% set urgency = task.due_urgency() %}
+                <span class="badge {% if task.is_overdue() %}badge-overdue{% elif urgency %}due-{{ urgency }}{% else %}badge-not_started{% endif %}">
+                    {{ task.due_date.strftime('%d %b') }}
+                </span>
+                {% endif %}
+            </div>
+            {% if task.start_date %}
+            <div class="task-card-timeline">
+                {{ task.start_date.strftime('%d %b') }} → {{ task.due_date.strftime('%d %b') if task.due_date else '—' }}
+            </div>
+            {% endif %}
+            {% if task.assignee %}
+            <div class="task-card-assignee" style="margin-top:8px;">👤 {{ task.assignee.name }}</div>
+            {% endif %}
+        </a>
+        {% else %}
+        <div style="color:var(--text-muted); font-size:12px; padding:10px 0;">No tasks</div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

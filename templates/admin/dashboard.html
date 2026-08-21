@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Analytics - TaskFlow{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Analytics</h1>
+        <div class="page-subtitle">Live task, project, and team stats</div>
+    </div>
+</div>
+
+<div class="chart-grid">
+    <div class="card chart-card">
+        <h3 style="margin-top:0;">Tasks by status</h3>
+        <canvas id="statusChart"></canvas>
+    </div>
+    <div class="card chart-card">
+        <h3 style="margin-top:0;">Created vs completed — last {{ timeline_days }} days</h3>
+        <canvas id="timelineChart"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-top:0;">Projects</h3>
+    {% if project_stats %}
+    <table>
+        <thead><tr><th>Project</th><th>Total tasks</th><th>% complete</th><th>Overdue</th></tr></thead>
+        <tbody>
+        {% for row in project_stats %}
+            <tr>
+                <td><a href="{{ url_for('main.project_board', project_id=row.project.id) }}">{{ row.project.name }}</a></td>
+                <td>{{ row.total }}</td>
+                <td>
+                    <span class="progress-bar-sm"><span class="progress-fill" style="width:{{ row.percent_complete }}%;"></span></span>
+                    {{ row.percent_complete }}%
+                </td>
+                <td>{% if row.overdue %}<span class="badge badge-overdue">{{ row.overdue }}</span>{% else %}0{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="empty-state-icon">▤</div>No projects yet.</div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3 style="margin-top:0;">Analysts</h3>
+    {% if user_stats %}
+    <table class="sortable-table" id="userStatsTable">
+        <thead>
+            <tr>
+                <th data-sort="text">Name<span class="sort-arrow">⇅</span></th>
+                <th data-sort="num">Assigned<span class="sort-arrow">⇅</span></th>
+                <th data-sort="num">Completed<span class="sort-arrow">⇅</span></th>
+                <th data-sort="num">Completion rate<span class="sort-arrow">⇅</span></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in user_stats %}
+            <tr>
+                <td>{{ row.user.name }}</td>
+                <td>{{ row.assigned }}</td>
+                <td>{{ row.completed }}</td>
+                <td>{{ row.rate }}%</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="empty-state-icon">☺</div>No analysts yet.</div>
+    {% endif %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    fetch("{{ url_for('analytics.admin_dashboard_data') }}")
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            new Chart(document.getElementById("statusChart"), {
+                type: "bar",
+                data: {
+                    labels: ["Not started", "Ongoing", "Hold", "Complete"],
+                    datasets: [{
+                        label: "Tasks",
+                        data: [
+                            data.status_counts.not_started,
+                            data.status_counts.ongoing,
+                            data.status_counts.hold,
+                            data.status_counts.complete
+                        ],
+                        backgroundColor: ["#edeef1", "#4573d2", "#e0850f", "#14a35a"]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+                }
+            });
+
+            new Chart(document.getElementById("timelineChart"), {
+                type: "line",
+                data: {
+                    labels: data.timeline.labels,
+                    datasets: [
+                        { label: "Created", data: data.timeline.created, borderColor: "#4573d2", backgroundColor: "#4573d2", tension: 0.25 },
+                        { label: "Completed", data: data.timeline.completed, borderColor: "#14a35a", backgroundColor: "#14a35a", tension: 0.25 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+                }
+            });
+        })
+        .catch(function (err) { console.error("Failed to load dashboard data:", err); });
+
+    // Lightweight click-to-sort for the analyst table - no extra
+    // dependency, matches the existing "no build step" plain-JS style
+    // already used elsewhere (e.g. tasks/detail.html's checkbox auto-submit).
+    var table = document.getElementById("userStatsTable");
+    if (table) {
+        var tbody = table.tBodies[0];
+        table.querySelectorAll("th[data-sort]").forEach(function (th, colIndex) {
+            var ascending = true;
+            th.addEventListener("click", function () {
+                var type = th.getAttribute("data-sort");
+                var rows = Array.prototype.slice.call(tbody.rows);
+                rows.sort(function (a, b) {
+                    var av = a.cells[colIndex].innerText.trim();
+                    var bv = b.cells[colIndex].innerText.trim();
+                    if (type === "num") {
+                        av = parseFloat(av) || 0;
+                        bv = parseFloat(bv) || 0;
+                        return ascending ? av - bv : bv - av;
+                    }
+                    return ascending ? av.localeCompare(bv) : bv.localeCompare(av);
+                });
+                rows.forEach(function (row) { tbody.appendChild(row); });
+                ascending = !ascending;
+            });
+        });
+    }
+})();
+</script>
+{% endblock %}

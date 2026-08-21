@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+venv/
+.env
+app.db
+instance/
+
+# User-uploaded comment attachments - not source, don't version them
+uploads/
+
+# Gmail API OAuth2 secrets — never commit these
+client_secret.json
+token.json

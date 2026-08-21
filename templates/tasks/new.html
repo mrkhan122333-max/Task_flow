@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}New task - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="{{ url_for('main.project_list') }}">Projects</a> /
+    <a href="{{ url_for('main.project_board', project_id=project.id) }}">{{ project.name }}</a> / New task
+</div>
+<h1 class="page-title">New task</h1>
+
+<div class="card" style="max-width:520px;">
+    <form method="POST">
+        <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-input" type="text" name="title" value="{{ (form or {}).get('title', '') }}" required autofocus>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" name="description">{{ (form or {}).get('description', '') }}</textarea>
+        </div>
+        <div class="date-range-row">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Start date</label>
+                <input class="form-input" type="date" name="start_date" value="{{ (form or {}).get('start_date', '') }}">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Due date</label>
+                <input class="form-input" type="date" name="due_date" value="{{ (form or {}).get('due_date', '') }}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Priority</label>
+            <select class="form-select" name="priority">
+                {% for p in VALID_PRIORITIES %}
+                <option value="{{ p }}" {% if (form and form.get('priority') == p) or (not form and p == 'medium') %}selected{% endif %}>{{ p|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Assignee</label>
+            <select class="form-select" name="assignee_id">
+                <option value="">Unassigned</option>
+                {% for m in project.members %}
+                <option value="{{ m.id }}" {% if form and form.get('assignee_id')|string == m.id|string %}selected{% endif %}>{{ m.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn" type="submit">Create task</button>
+    </form>
+</div>
+{% endblock %}

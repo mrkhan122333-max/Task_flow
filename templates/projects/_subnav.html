@@ -1,0 +1,9 @@
+{# Expects `project` and `active` ("board" | "team" | "messages") in context #}
+<div class="project-subnav">
+    <a href="{{ url_for('main.project_board', project_id=project.id) }}"
+       class="project-subnav-item {% if active == 'board' %}active{% endif %}">Board</a>
+    <a href="{{ url_for('main.project_team', project_id=project.id) }}"
+       class="project-subnav-item {% if active == 'team' %}active{% endif %}">Team</a>
+    <a href="{{ url_for('messaging.inbox', project_id=project.id) }}"
+       class="project-subnav-item {% if active == 'messages' %}active{% endif %}">Messages</a>
+</div>

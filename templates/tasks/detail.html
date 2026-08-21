@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="{{ url_for('main.project_board', project_id=task.project_id) }}">{{ task.project.name }}</a> / {{ task.title }}
+</div>
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{{ task.title }}</h1>
+    </div>
+    <div style="display:flex; gap:8px;">
+        {% set can_set_status = current_user.is_admin or (current_user.role == 'analyst' and task.assignee_id == current_user.id) %}
+        {% if can_set_status %}
+        <form class="inline-form" method="POST" action="{{ url_for('main.task_update_status', task_id=task.id) }}">
+            <select class="form-select badge-{{ task.status }}" name="status" onchange="this.form.submit()"
+                    style="border:none; font-weight:700; cursor:pointer;">
+                {% for s in VALID_STATUSES %}
+                <option value="{{ s }}" {% if task.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>
+                {% endfor %}
+            </select>
+        </form>
+        {% endif %}
+        {% if current_user.is_admin %}
+        <a href="{{ url_for('main.task_edit', task_id=task.id) }}" class="btn btn-secondary">Edit</a>
+        <form class="inline-form" method="POST" action="{{ url_for('main.task_delete', task_id=task.id) }}"
+              onsubmit="return confirm('Delete this task?');">
+            <button class="btn btn-danger" type="submit">Delete</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="grid-2">
+    <div>
+        <div class="card">
+            <div class="detail-meta-row">
+                <div class="detail-meta-item">
+                    <span class="detail-meta-label">Status</span>
+                    <span class="badge badge-{{ task.status }}">{{ STATUS_LABELS[task.status] }}</span>
+                </div>
+                <div class="detail-meta-item">
+                    <span class="detail-meta-label">Priority</span>
+                    <span class="badge badge-{{ task.priority }}">{{ task.priority }}</span>
+                </div>
+                <div class="detail-meta-item">
+                    <span class="detail-meta-label">Timeline</span>
+                    <span>
+                        {% if task.start_date or task.due_date %}
+                            {% if task.start_date %}{{ task.start_date.strftime('%d %b %Y') }}{% else %}—{% endif %}
+                            →
+                            {% set urgency = task.due_urgency() %}
+                            <span class="{% if urgency %}badge due-{{ urgency }}{% endif %}">
+                                {% if task.due_date %}{{ task.due_date.strftime('%d %b %Y') }}{% else %}—{% endif %}
+                            </span>
+                            {% if task.is_overdue() %} <span class="badge badge-overdue">overdue</span>{% endif %}
+                        {% else %}—{% endif %}
+                    </span>
+                </div>
+                <div class="detail-meta-item">
+                    <span class="detail-meta-label">Assignee</span>
+                    <span>{{ task.assignee.name if task.assignee else 'Unassigned' }}</span>
+                </div>
+            </div>
+            {% if task.description %}
+            <p style="white-space:pre-wrap;">{{ task.description }}</p>
+            {% else %}
+            <p style="color:var(--text-muted);">No description.</p>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0;">Subtasks</h3>
+            {% for st in task.subtasks %}
+            <div class="subtask-row {% if st.is_complete %}done{% endif %}">
+                <form class="inline-form" method="POST" action="{{ url_for('main.subtask_toggle', subtask_id=st.id) }}">
+                    <input type="checkbox" onchange="this.form.submit()" {% if st.is_complete %}checked{% endif %}>
+                </form>
+                <span class="subtask-title">{{ st.title }}</span>
+            </div>
+            {% else %}
+            <p style="color:var(--text-muted); font-size:13px;">No subtasks yet.</p>
+            {% endfor %}
+
+            {% if current_user.is_admin %}
+            <form method="POST" action="{{ url_for('main.subtask_add', task_id=task.id) }}" style="display:flex; gap:8px; margin-top:10px;">
+                <input class="form-input" type="text" name="title" placeholder="Add a subtask..." required>
+                <button class="btn btn-secondary" type="submit">Add</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-top:0;">Comments</h3>
+        {% for c in task.comments %}
+        <div class="comment">
+            <div class="comment-meta"><span class="comment-author">{{ c.author.name }}</span> &middot; {{ c.created_at.strftime('%d %b, %H:%M') }}</div>
+            {% if c.body %}<div style="white-space:pre-wrap;">{{ c.body|linkify }}</div>{% endif %}
+
+            {% if c.attachments %}
+            <div class="attachment-list">
+                {% for a in c.attachments %}
+                <div class="attachment-item">
+                    {% if a.file_type == 'image' %}
+                    <a href="{{ url_for('attachments.serve_attachment', attachment_id=a.id) }}" target="_blank">
+                        <img class="attachment-thumb" src="{{ url_for('attachments.serve_attachment', attachment_id=a.id) }}" alt="{{ a.filename }}">
+                    </a>
+                    {% else %}
+                    <a class="attachment-file" href="{{ url_for('attachments.serve_attachment', attachment_id=a.id) }}">
+                        <span class="attachment-icon">{% if a.file_type == 'spreadsheet' %}▦{% else %}▤{% endif %}</span>
+                        {{ a.filename }}
+                    </a>
+                    {% endif %}
+                    {% if current_user.is_admin or c.user_id == current_user.id %}
+                    <form class="inline-form" method="POST" action="{{ url_for('attachments.delete_attachment', attachment_id=a.id) }}"
+                          onsubmit="return confirm('Delete this attachment?');">
+                        <button class="attachment-delete" type="submit" title="Delete attachment">✕</button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted); font-size:13px;">No comments yet.</p>
+        {% endfor %}
+
+        <form method="POST" action="{{ url_for('main.comment_add', task_id=task.id) }}"
+              style="margin-top:12px;" enctype="multipart/form-data">
+            <textarea class="form-textarea" name="body" placeholder="Write a comment..." style="min-height:70px;"></textarea>
+            <div class="comment-attach-row">
+                <input type="file" name="attachment" id="attachment-input"
+                       accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx,.csv">
+                <span class="comment-attach-hint">Images, PDF, DOCX, XLSX, CSV — up to 10MB</span>
+            </div>
+            <button class="btn btn-secondary" type="submit" style="margin-top:8px;">Comment</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

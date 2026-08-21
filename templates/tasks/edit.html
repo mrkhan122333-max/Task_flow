@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Edit task - TaskFlow{% endblock %}
+{% block content %}
+<div class="breadcrumb">
+    <a href="{{ url_for('main.project_board', project_id=task.project_id) }}">{{ task.project.name }}</a> /
+    <a href="{{ url_for('main.task_detail', task_id=task.id) }}">{{ task.title }}</a> / Edit
+</div>
+<h1 class="page-title">Edit task</h1>
+
+<div class="card" style="max-width:520px;">
+    <form method="POST">
+        <div class="form-group">
+            <label class="form-label">Title</label>
+            <input class="form-input" type="text" name="title"
+                   value="{{ (form.get('title') if form else task.title) }}" required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" name="description">{{ form.get('description') if form else task.description }}</textarea>
+        </div>
+        <div class="date-range-row">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Start date</label>
+                <input class="form-input" type="date" name="start_date"
+                       value="{{ form.get('start_date', '') if form else (task.start_date.isoformat() if task.start_date else '') }}">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Due date</label>
+                <input class="form-input" type="date" name="due_date"
+                       value="{{ form.get('due_date', '') if form else (task.due_date.isoformat() if task.due_date else '') }}">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Priority</label>
+            <select class="form-select" name="priority">
+                {% for p in VALID_PRIORITIES %}
+                <option value="{{ p }}" {% if (form and form.get('priority') == p) or (not form and p == task.priority) %}selected{% endif %}>{{ p|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" name="status">
+                {% set current_status = form.get('status') if form else task.status %}
+                {% for s in VALID_STATUSES %}
+                <option value="{{ s }}" {% if current_status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Assignee</label>
+            <select class="form-select" name="assignee_id">
+                <option value="">Unassigned</option>
+                {% set current_assignee = form.get('assignee_id') if form else (task.assignee_id|string if task.assignee_id else '') %}
+                {% for m in task.project.members %}
+                <option value="{{ m.id }}" {% if current_assignee == m.id|string %}selected{% endif %}>{{ m.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn" type="submit">Save changes</button>
+    </form>
+</div>
+{% endblock %}
