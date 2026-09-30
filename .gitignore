@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Runtime data (never commit user data)
+data/
+uploads/
+.env
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db
