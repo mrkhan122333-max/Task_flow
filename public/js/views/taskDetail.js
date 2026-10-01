@@ -1,14 +1,16 @@
-// Task detail — slide-out drawer with status, meta, subtasks, attachments and
-// a threaded comment stream. Available to the assignee or admins.
+// Task detail — slide-out drawer with status, meta, subtasks, attachments, a
+// threaded comment stream and the append-only audit history.
+// Anyone with access to the task (admin, assignee, or project member) can open
+// it; only admins can edit or delete the task itself.
 
 import { api, uploadFile } from '../api.js';
 import { store, userById, emit } from '../store.js';
 import {
   icon, avatar, toast, openModal, confirmModal, statusOptions, taskFormModal,
-  projectInfo,
+  projectInfo, activityList,
 } from '../components.js';
 import {
-  esc, fmtDate, timeAgo, fmtSize, fileAccent, fileLabel, isOverdue, STATUS_META,
+  esc, fmtDate, timeAgo, fmtSize, fileAccent, fileLabel, taskIsOverdue, dueLabel, STATUS_META,
   PRIORITY_META,
 } from '../util.js';
 
@@ -18,6 +20,8 @@ let built = false;
 let drawerEl = null;
 let overlayEl = null;
 let bodyEl = null;
+// Whether the audit trail shows every entry or just the most recent ones.
+let historyExpanded = false;
 
 function ensureBuilt() {
   if (built) return;
@@ -49,6 +53,7 @@ export function openTask(taskId) {
   ensureBuilt();
   currentTaskId = taskId;
   drawerOpen = true;
+  historyExpanded = false;
   overlayEl.hidden = false;
   drawerEl.setAttribute('aria-hidden', 'false');
   // next frame so the transition plays
@@ -66,6 +71,34 @@ export function closeTask() {
 }
 
 // ---------- loading ----------
+// Re-reads the audit trail after a change so a newly recorded entry appears
+// immediately (the history itself is append-only on the server).
+async function refreshActivity(task) {
+  try {
+    const res = await api.get('/api/tasks/' + task.id + '/activity');
+    task._activity = res.activity || [];
+  } catch (err) {
+    task._activity = task._activity || [];
+  }
+}
+
+// Swaps the audit list, its entry count and the "show all" toggle in place, so a
+// partial update never leaves a stale count next to a fresh list.
+function paintActivity(task) {
+  const entries = task._activity || [];
+  const box = bodyEl.querySelector('#activity-box');
+  if (box) {
+    box.innerHTML = activityList(entries, { limit: historyExpanded ? 200 : 8 });
+  }
+  const count = bodyEl.querySelector('#activity-count');
+  if (count) count.textContent = String(entries.length);
+  const toggle = bodyEl.querySelector('#history-toggle');
+  if (toggle) {
+    toggle.textContent = historyExpanded ? 'Show less' : 'Show all ' + entries.length + ' entries';
+    toggle.hidden = entries.length <= 8;
+  }
+}
+
 async function load() {
   const head = document.getElementById('drawer-head');
   bodyEl.innerHTML = '<div class="spinner"></div>';
@@ -77,24 +110,27 @@ async function load() {
 
   if (!currentTaskId) return;
   try {
-    const [taskRes, commentsRes, filesRes] = await Promise.all([
+    const [taskRes, commentsRes, filesRes, activityRes] = await Promise.all([
       api.get('/api/tasks/' + currentTaskId),
       api.get('/api/tasks/' + currentTaskId + '/comments'),
       api.get('/api/tasks/' + currentTaskId + '/files'),
+      api.get('/api/tasks/' + currentTaskId + '/activity').catch(() => ({ activity: [] })),
     ]);
     const task = taskRes.task;
     task._comments = commentsRes.comments;
     task._files = filesRes.files;
+    task._activity = activityRes.activity || [];
     render(task);
   } catch (err) {
-    if (err.status === 404) {
+    if (err.status === 404 || err.code === 'NOT_FOUND') {
       head.innerHTML = '<div style="flex:1"><div class="drawer-title">Task not found</div>' +
-        '<div class="drawer-meta">It may have been deleted.</div></div>' +
+        '<div class="drawer-meta">It may have been deleted, or you may no longer have access to it.</div></div>' +
         '<button type="button" class="icon-btn" id="drawer-x2">' + icon('x', 18) + '</button>';
       bodyEl.innerHTML = '<div class="empty-state">' + icon('alert', 28) + '</div>';
       document.getElementById('drawer-x2').addEventListener('click', closeTask);
       return;
     }
+    if (err.status === 401) return; // the API layer is already bouncing to login
     toast(err.message || 'Could not load task.', 'error');
     closeTask();
   }
@@ -107,8 +143,9 @@ function render(task) {
   const meta = STATUS_META[task.status] || STATUS_META.not_started;
 
   const assignee = task.assigneeId ? userById(task.assigneeId) : null;
+  const creator = task.createdById ? userById(task.createdById) : null;
   const project = task.projectId ? projectInfo(task) : null;
-  const overdue = isOverdue(task);
+  const overdue = taskIsOverdue(task);
   const pmeta = PRIORITY_META[(task && task.priority) || 'medium'] || PRIORITY_META.medium;
 
   head.innerHTML =
@@ -127,11 +164,13 @@ function render(task) {
           : '') +
       '</div>' +
       '<div class="drawer-meta">' +
-        esc('Created ' + timeAgo(task.createdAt)) +
+        esc('Created ' + timeAgo(task.createdAt) + (creator ? ' by ' + (creator.displayName || creator.username) : '')) +
         (task.updatedAt ? ' · updated ' + timeAgo(task.updatedAt) : '') +
+        (task.completedAt ? ' · completed ' + timeAgo(task.completedAt) : '') +
       '</div>' +
     '</div>' +
     '<div class="inline-flex" style="gap:4px">' +
+      '<button type="button" class="icon-btn" id="goto-history" title="Activity history">' + icon('history', 17) + '</button>' +
       (isAdmin
         ? '<button type="button" class="icon-btn" id="edit-task" title="Edit task">' + icon('pen', 17) + '</button>'
         : '') +
@@ -142,6 +181,16 @@ function render(task) {
     '</div>';
 
   document.getElementById('drawer-x').addEventListener('click', closeTask);
+
+  const historyBtn = head.querySelector('#goto-history');
+  if (historyBtn) {
+    historyBtn.addEventListener('click', () => {
+      historyExpanded = true;
+      paintActivity(task);
+      const box = bodyEl.querySelector('#activity-box');
+      if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
 
   // Status change UI: open a small modal with the status options.
   const changeBtn = head.querySelector('.change-status-btn');
@@ -158,6 +207,8 @@ function render(task) {
           const upd = await api.put('/api/tasks/' + task.id + '/status', { status });
           task.status = upd.task.status;
           task.updatedAt = upd.task.updatedAt;
+          task.completedAt = upd.task.completedAt;
+          await refreshActivity(task);
           emit('task-updated', { id: task.id });
           toast('Status updated to ' + STATUS_META[status].label + '.');
           render(task);
@@ -201,7 +252,11 @@ function render(task) {
     '<div class="detail-grid">' +
       '<div class="detail-box"><div class="dlabel">Assignee</div><div class="dval">' + (assignee ? avatar(assignee, 22) + ' ' + esc(assignee.displayName || assignee.username) : '<span class="muted">Unassigned</span>') + '</div></div>' +
       '<div class="detail-box"><div class="dlabel">Start date</div><div class="dval">' + (task.startDate ? icon('clock', 15) + ' ' + esc(fmtDate(task.startDate)) : '<span class="muted">Not set</span>') + '</div></div>' +
-      '<div class="detail-box"><div class="dlabel">Due date</div><div class="dval"' + (overdue ? ' style="color:var(--c-red)"' : '') + '>' + (task.dueDate ? icon('calendar', 15) + ' ' + esc(fmtDate(task.dueDate)) : '<span class="muted">Not set</span>') + '</div></div>' +
+      '<div class="detail-box"><div class="dlabel">Due date</div><div class="dval"' + (overdue ? ' style="color:var(--c-red)"' : '') + '>' +
+        (task.dueDate
+          ? icon('calendar', 15) + ' ' + esc(fmtDate(task.dueDate)) +
+            (dueLabel(task) ? ' <span class="muted" style="font-size:12px">(' + esc(dueLabel(task)) + ')</span>' : '')
+          : '<span class="muted">Not set</span>') + '</div></div>' +
       '<div class="detail-box"><div class="dlabel">Project</div><div class="dval">' + (project ? '<span class="proj-chip"><span class="dot" style="background:' + esc(project.color) + '"></span>' + esc(project.name) + '</span>' : '<span class="muted">—</span>') + '</div></div>' +
     '</div>' +
 
@@ -235,8 +290,31 @@ function render(task) {
         '<button type="button" class="btn btn-primary btn-sm" id="comment-post" style="margin-left:auto">' + icon('send', 14) + ' Comment</button>' +
       '</div>' +
     '</div>' +
+
+    '<hr class="divider">' +
+    sectionHeader('Activity history', '<span class="badge badge-muted" id="activity-count">' + (task._activity ? task._activity.length : 0) + '</span>') +
+    '<p class="hint" style="margin:-4px 0 10px">' +
+      'Every change to this task is recorded permanently and cannot be edited or deleted.' +
+    '</p>' +
+    '<div class="activity-box" id="activity-box">' +
+      activityList(task._activity, { limit: historyExpanded ? 200 : 8 }) +
+    '</div>' +
+    ((task._activity || []).length > 8
+      ? '<button type="button" class="btn btn-ghost btn-sm" id="history-toggle" style="margin-top:8px">' +
+          (historyExpanded ? 'Show less' : 'Show all ' + task._activity.length + ' entries') +
+        '</button>'
+      : '<button type="button" class="btn btn-ghost btn-sm" id="history-toggle" style="margin-top:8px" hidden></button>') +
+
     '<input type="file" id="file-input" hidden>' +
     '<input type="file" id="comment-file-input" hidden>';
+
+  const historyToggle = bodyEl.querySelector('#history-toggle');
+  if (historyToggle) {
+    historyToggle.addEventListener('click', () => {
+      historyExpanded = !historyExpanded;
+      render(task);
+    });
+  }
 
   const fileInput = bodyEl.querySelector('#file-input');
   const addFile = bodyEl.querySelector('#add-file');
@@ -247,9 +325,13 @@ function render(task) {
     try {
       const res = await uploadFile('/api/upload', { taskId: task.id, file });
       task._files = [res.file].concat(task._files || []);
+      // The server appended a "file uploaded" entry — pull it in so the trail
+      // never lags a change the user just made.
+      await refreshActivity(task);
       emit('task-updated', { id: task.id });
       bodyEl.querySelector('#file-list').outerHTML = '<div class="attach-list" id="file-list">' + renderFiles(task, task._files) + '</div>';
       rebindFiles(task);
+      paintActivity(task);
       toast('File attached.');
     } catch (err) {
       toast(err.message || 'Upload failed.', 'error');
@@ -294,6 +376,7 @@ function render(task) {
       const filesRes = await api.get('/api/tasks/' + task.id + '/files');
       task._comments = commentsRes.comments;
       task._files = filesRes.files;
+      await refreshActivity(task);
       cText.value = '';
       pendingCommentFile = null;
       cName.textContent = '';
@@ -301,6 +384,7 @@ function render(task) {
       emit('task-updated', { id: task.id });
       bodyEl.querySelector('#comment-thread').outerHTML =
         '<div class="comment-thread" id="comment-thread">' + renderComments(task, task._comments) + '</div>';
+      paintActivity(task);
       rebindComments(task);
     } catch (err) {
       toast(err.message || 'Could not post comment.', 'error');
@@ -459,9 +543,11 @@ function rebindFiles(task) {
       try {
         await api.del('/api/files/' + id);
         task._files = (task._files || []).filter((f) => f.id !== id);
+        await refreshActivity(task);
         emit('task-updated', { id: task.id });
         bodyEl.querySelector('#file-list').outerHTML = '<div class="attach-list" id="file-list">' + renderFiles(task, task._files) + '</div>';
         rebindFiles(task);
+        paintActivity(task);
       } catch (err) {
         toast(err.message || 'Could not delete file.', 'error');
       }
@@ -478,10 +564,12 @@ function rebindComments(task) {
       try {
         await api.del('/api/comments/' + id);
         task._comments = (task._comments || []).filter((c) => c.id !== id);
+        await refreshActivity(task);
         emit('task-updated', { id: task.id });
         bodyEl.querySelector('#comment-thread').outerHTML =
           '<div class="comment-thread" id="comment-thread">' + renderComments(task, task._comments) + '</div>';
         rebindComments(task);
+        paintActivity(task);
       } catch (err) {
         toast(err.message || 'Could not delete comment.', 'error');
       }

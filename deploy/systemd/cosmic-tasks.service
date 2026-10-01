@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+#  Cosmic Info Solutions — Task Management
+#  systemd unit for a bare-metal deployment (no Docker).
+#
+#  Install:
+#    sudo useradd --system --home /opt/cosmic-tasks --shell /usr/sbin/nologin cosmic-tasks
+#    sudo mkdir -p /opt/cosmic-tasks && sudo chown -R cosmic-tasks:cosmic-tasks /opt/cosmic-tasks
+#    sudo cp -r . /opt/cosmic-tasks && cd /opt/cosmic-tasks
+#    sudo -u cosmic-tasks npm ci --omit=dev
+#    sudo install -m 600 -o cosmic-tasks -g cosmic-tasks .env /etc/cosmic-tasks.env
+#    sudo cp deploy/systemd/cosmic-tasks.service /etc/systemd/system/
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now cosmic-tasks
+#
+#  Then point Nginx at 127.0.0.1:4321 (see deploy/nginx/).
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Cosmic Info Solutions Task Management (Node/Express)
+Documentation=https://tasks.cosmicinfosolutions.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cosmic-tasks
+Group=cosmic-tasks
+WorkingDirectory=/opt/cosmic-tasks
+
+# Configuration, including the mandatory SESSION_SECRET, kept out of the repo.
+# Must be owned by the service user and mode 600 (see the install note above),
+# otherwise systemd cannot hand the variables to User=cosmic-tasks.
+EnvironmentFile=/etc/cosmic-tasks.env
+Environment=NODE_ENV=production
+Environment=PORT=4321
+Environment=HOST=127.0.0.1
+Environment=DATA_DIR=/opt/cosmic-tasks/data
+Environment=UPLOAD_DIR=/opt/cosmic-tasks/uploads
+# One Nginx in front of this process.
+Environment=TRUST_PROXY_HOPS=1
+
+ExecStart=/usr/bin/node /opt/cosmic-tasks/server.js
+Restart=always
+RestartSec=5
+# server.js drains connections on SIGTERM; give it room before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cosmic-tasks
+
+# --- Hardening ---------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# The only writable paths.
+ReadWritePaths=/opt/cosmic-tasks/data /opt/cosmic-tasks/uploads
+
+[Install]
+WantedBy=multi-user.target

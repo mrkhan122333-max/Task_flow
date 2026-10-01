@@ -1,9 +1,10 @@
-// Thin fetch wrapper for the TaskFlow API. Handles JSON, CSRF headers,
-// multipart uploads and a global "session expired" hook.
+// Thin fetch wrapper for the Cosmic Info Solutions Task Management API.
+// Handles JSON, CSRF headers, multipart uploads and a global "session expired"
+// hook.
 
 export const BASE = (window.__BASE__ !== undefined) ? window.__BASE__ : '';
 
-const CSRF_COOKIE = 'taskflow_csrf';
+const CSRF_COOKIE = 'cosmic_csrf';
 
 export class ApiError extends Error {
   constructor(message, status, code) {

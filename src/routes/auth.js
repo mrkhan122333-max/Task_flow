@@ -5,9 +5,9 @@
 const express = require('express');
 const db = require('../db');
 const config = require('../config');
-const { verifyPassword, newToken, sha256 } = require('../lib/crypto');
-const { cleanString, publicUser, fail } = require('../lib/validate');
-const { authRequired, setSessionCookies, clearSessionCookies } = require('../middleware/auth');
+const { verifyPassword, newToken } = require('../lib/crypto');
+const { cleanString, isActiveUser, publicUser, fail } = require('../lib/validate');
+const { authRequired, sessionDigest, setSessionCookies, clearSessionCookies } = require('../middleware/auth');
 
 const router = express.Router();
 const MAX_FAILED = 8;
@@ -60,24 +60,33 @@ router.post('/auth/login', (req, res) => {
     return fail(res, 429, 'Too many failed attempts. Please try again in a few minutes.', 'RATE_LIMITED');
   }
 
-  const user = db.find('users', (u) => u.username.toLowerCase() === username.toLowerCase());
+  const user = db.find('users', (u) => String(u.username || '').toLowerCase() === username.toLowerCase());
   if (!user || !verifyPassword(password, user.passwordHash)) {
     recordFailure(key);
     return fail(res, 401, 'Invalid username or password.');
+  }
+
+  // A deactivated account keeps its password on file but cannot sign in.
+  if (!isActiveUser(user)) {
+    return fail(res, 403, 'This account has been deactivated. Please contact an administrator.', 'ACCOUNT_INACTIVE');
   }
 
   // All good — create a session and issue cookies.
   const sidToken = newToken();
   const csrfToken = newToken();
   db.insert('sessions', {
-    tokenHash: sha256(sidToken),
+    tokenHash: sessionDigest(sidToken),
     userId: user.id,
     createdAt: db.now(),
     expiresAt: new Date(Date.now() + config.sessionTtlMs).toISOString(),
   });
   setSessionCookies(res, sidToken, csrfToken);
   clearAttempts(key);
-  return res.json({ user: publicUser(user) });
+  // Remembered in Manage Users so an admin can tell a dormant account from an
+  // active one. This is presentation-only, never used for authorization.
+  const lastLoginAt = db.now();
+  db.update('users', user.id, { lastLoginAt });
+  return res.json({ user: publicUser(Object.assign({}, user, { lastLoginAt })) });
 });
 
 router.post('/auth/logout', authRequired, (req, res) => {

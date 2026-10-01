@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { store, emit } from '../store.js';
 import { icon, avatar, taskFormModal } from '../components.js';
-import { esc, debounce, STATUS_META } from '../util.js';
+import { esc, debounce, STATUS_META, roleLabel } from '../util.js';
 
 export const NAV = [
   { id: 'home', label: 'Home', icon: 'home', href: '#/' },
@@ -24,8 +24,11 @@ export function buildShell(root) {
       '<aside class="sidebar" id="sidebar">' +
         '<div class="sidebar-head">' +
           '<div class="auth-brand" style="margin:0">' +
-            '<span class="brand-mark" style="width:36px;height:36px;font-size:15px">TF</span>' +
-            '<span class="brand-name" style="font-size:18px">TaskFlow</span>' +
+            '<span class="brand-mark" style="width:36px;height:36px;font-size:15px">CI</span>' +
+            '<span>' +
+              '<span class="brand-name" style="font-size:16px;display:block;line-height:1.15">Task Management</span>' +
+              '<span class="brand-org">Cosmic Info Solutions</span>' +
+            '</span>' +
           '</div>' +
           '<button type="button" class="icon-btn sidebar-close" id="sidebar-close">' + icon('x', 18) + '</button>' +
         '</div>' +
@@ -88,7 +91,9 @@ export function buildShell(root) {
   const dropdown = document.getElementById('account-dropdown');
   document.getElementById('acc-name').textContent = store.user.displayName || store.user.username;
   document.getElementById('acc-dn').textContent = store.user.displayName || store.user.username;
-  document.getElementById('acc-role').textContent = '@' + store.user.username + ' · ' + (store.user.role === 'admin' ? 'Admin' : 'Analyst');
+  document.getElementById('acc-role').textContent =
+    '@' + store.user.username + ' · ' + roleLabel(store.user.role) +
+    (store.user.designation ? ' · ' + store.user.designation : '');
   document.getElementById('acc-avatar').innerHTML = avatar(store.user, 30);
 
   accountBtn.addEventListener('click', (e) => {
@@ -135,7 +140,7 @@ export function buildShell(root) {
       parts.push('<div class="search-group">People</div>' + data.users.map((u) =>
         '<div class="search-item" data-user="' + esc(u.id) + '">' + avatar(u, 22) +
           '<span>' + esc(u.displayName || u.username) + '</span>' +
-          '<span class="search-kind">' + esc(u.role) + '</span></div>').join(''));
+          '<span class="search-kind">' + esc(roleLabel(u.role)) + '</span></div>').join(''));
     }
     if (!parts.length) {
       parts.push('<div class="search-group">No results</div>');

@@ -1,6 +1,10 @@
 // Tasks view — Kanban board and list with filters, drag & drop, and scoping.
-//   mode 'mine' → analyst scope (own assignments) or admin's "My Tasks"
+//   mode 'mine' → the caller's own assignments
 //   mode 'all'  → admin Oversight (every task in the company)
+//
+// The server applies the access rule (admin = everything, employee = assigned
+// or a project they belong to) and derives `overdue` / `dueToday`, so the board
+// can never show work the user is not allowed to see.
 
 import { api } from '../api.js';
 import { store, emit } from '../store.js';
@@ -9,6 +13,8 @@ import {
 } from '../components.js';
 import { esc, STATUS, STATUS_META, PRIORITY_META } from '../util.js';
 
+const VIEW_KEY = 'cosmic-tasks-view';
+
 export function renderTasks(main, opts) {
   const state = {
     mode: opts.mode || 'mine',
@@ -16,9 +22,10 @@ export function renderTasks(main, opts) {
     status: '',
     priority: '',
     assigneeId: '',
+    due: opts.due || '',
     overdue: opts.overdue === '1',
     sort: 'updated',
-    view: localStorage.getItem('tf-view') || 'board',
+    view: localStorage.getItem(VIEW_KEY) || 'board',
     tasks: [],
     draggingId: null,
   };
@@ -60,13 +67,22 @@ export function renderTasks(main, opts) {
     ];
     if (store.user.role === 'admin') {
       selects.push('<div class="select-wrap"><select id="f-assignee" class="input"><option value="">Any assignee</option>' +
-        store.users.map((u) => '<option value="' + esc(u.id) + '"' + (state.assigneeId === u.id ? ' selected' : '') + '>' + esc(u.displayName || u.username) + '</option>').join('') +
+        store.users.map((u) => '<option value="' + esc(u.id) + '"' + (state.assigneeId === u.id ? ' selected' : '') + '>' +
+          esc(u.displayName || u.username) + (u.active === false ? ' (inactive)' : '') + '</option>').join('') +
         '</select>' + icon('chevD', 14) + '</div>');
     }
+    selects.push('<div class="select-wrap"><select id="f-due" class="input">' +
+      '<option value="">Any due date</option>' +
+      '<option value="overdue"' + (state.due === 'overdue' ? ' selected' : '') + '>Overdue</option>' +
+      '<option value="today"' + (state.due === 'today' ? ' selected' : '') + '>Due today</option>' +
+      '<option value="week"' + (state.due === 'week' ? ' selected' : '') + '>Due in next 7 days</option>' +
+      '<option value="month"' + (state.due === 'month' ? ' selected' : '') + '>Due in next 30 days</option>' +
+      '<option value="none"' + (state.due === 'none' ? ' selected' : '') + '>No due date</option>' +
+      '</select>' + icon('chevD', 14) + '</div>');
     selects.push('<div class="select-wrap"><select id="f-sort" class="input"><option value="updated"' + (state.sort === 'updated' ? ' selected' : '') + '>Sort: recently updated</option>' +
       '<option value="created"' + (state.sort === 'created' ? ' selected' : '') + '>Sort: newest first</option>' +
       '<option value="due"' + (state.sort === 'due' ? ' selected' : '') + '>Sort: due date</option>' +
-      '<option value="priority"' + (state.sort === 'priority' ? ' selected' : '') + '>Sort: priority (High → Low)</option></select>' + icon('chevD', 14) + '</div>');
+      '<option value="priority"' + (state.sort === 'priority' ? ' selected' : '') + '>Sort: priority (Critical → Low)</option></select>' + icon('chevD', 14) + '</div>');
     selects.push('<button type="button" class="filter-chip' + (state.overdue ? ' active' : '') + '" id="f-overdue">' +
       icon('alert', 13) + ' Overdue only</button>');
     return selects.join('');
@@ -84,6 +100,7 @@ export function renderTasks(main, opts) {
     onChange('f-priority', 'priority');
     onChange('f-project', 'projectId');
     if (store.user.role === 'admin') onChange('f-assignee', 'assigneeId');
+    onChange('f-due', 'due');
     pick('f-sort').addEventListener('change', () => { state.sort = pick('f-sort').value; load(); });
 
     // Overdue toggle
@@ -103,7 +120,7 @@ export function renderTasks(main, opts) {
 
   function setView(v) {
     state.view = v;
-    localStorage.setItem('tf-view', v);
+    localStorage.setItem(VIEW_KEY, v);
     document.getElementById('view-list').classList.toggle('active', v === 'list');
     document.getElementById('view-board').classList.toggle('active', v === 'board');
     renderBody();
@@ -115,8 +132,12 @@ export function renderTasks(main, opts) {
     if (state.status) params.set('status', state.status);
     if (state.priority) params.set('priority', state.priority);
     if (state.projectId) params.set('projectId', state.projectId);
-    if (state.assigneeId && store.user.role === 'admin') params.set('assigneeId', state.assigneeId);
+    if (state.due) params.set('due', state.due);
     if (state.overdue) params.set('overdue', '1');
+    // "My Tasks" is always the caller's own work; Oversight is the company view.
+    // (An employee's board otherwise also lists project work they can open.)
+    if (state.mode === 'mine') params.set('assigneeId', store.user.id);
+    else if (state.assigneeId && store.user.role === 'admin') params.set('assigneeId', state.assigneeId);
     try {
       const data = await api.get('/api/tasks?' + params.toString());
       state.tasks = data.tasks;
@@ -124,8 +145,10 @@ export function renderTasks(main, opts) {
       toast(err.message || 'Could not load tasks.', 'error');
       state.tasks = [];
     }
+    const overdueCount = state.tasks.filter((t) => t.overdue).length;
     document.getElementById('tasks-subtitle').textContent =
-      state.tasks.length + ' task' + (state.tasks.length === 1 ? '' : 's');
+      state.tasks.length + ' task' + (state.tasks.length === 1 ? '' : 's') +
+      (overdueCount ? ' · ' + overdueCount + ' overdue' : '');
     renderBody();
   }
 
@@ -139,9 +162,9 @@ export function renderTasks(main, opts) {
       }
       if (state.sort === 'created') return (b.createdAt || '').localeCompare(a.createdAt || '');
       if (state.sort === 'priority') {
-        const order = { high: 0, medium: 1, low: 2 };
-        const pa = order[a.priority || 'medium'];
-        const pb = order[b.priority || 'medium'];
+        const order = { critical: 0, high: 1, medium: 2, low: 3 };
+        const pa = order[a.priority] === undefined ? 2 : order[a.priority];
+        const pb = order[b.priority] === undefined ? 2 : order[b.priority];
         if (pa !== pb) return pa - pb;
         return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
       }

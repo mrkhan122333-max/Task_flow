@@ -1,7 +1,10 @@
-// TaskFlow SPA bootstrap + hash router + global event wiring.
+// Cosmic Info Solutions — Task Management SPA bootstrap, hash router and
+// global event wiring.
 
 import { api, onUnauthorized } from './api.js';
 import { store, loadCaches, resetStore, on } from './store.js';
+import { icon } from './components.js';
+import { esc } from './util.js';
 import { buildShell } from './views/layout.js';
 import { renderLogin } from './views/login.js';
 import { renderHome } from './views/home.js';
@@ -46,6 +49,26 @@ function currentRoute() {
   return { segs, params, raw: hash };
 }
 
+// Most views fetch their data, so they are async. Without a catch a failed
+// request would leave the spinner on screen and surface as an unhandled
+// rejection; this keeps every route failure visible to the user instead.
+function runView(render, main, ...args) {
+  return Promise.resolve()
+    .then(() => render(main, ...args))
+    .catch((err) => {
+      if (err && err.status === 401) return; // the API layer is already bouncing to login
+      if (main) {
+        main.innerHTML = '<div class="empty-state">' + icon('alert', 28) +
+          '<div class="empty-title">Could not load this page</div>' +
+          '<div class="muted">' + esc((err && err.message) || 'Please try again.') + '</div>' +
+          '<button type="button" class="btn btn-primary btn-sm" id="retry-view" style="margin-top:12px">Retry</button>' +
+          '</div>';
+        const retry = main.querySelector('#retry-view');
+        if (retry) retry.addEventListener('click', () => route());
+      }
+    });
+}
+
 function route() {
   if (!store.user) { showLogin(); return; }
   if (!shell) return;
@@ -60,16 +83,17 @@ function route() {
   switch (first) {
     case 'home': {
       shell.renderNav('home');
-      renderHome(main);
+      runView(renderHome, main);
       break;
     }
     case 'tasks': {
       const mode = params.get('scope') === 'all' && isAdmin ? 'all' : 'mine';
       shell.renderNav(mode === 'all' ? 'all' : 'tasks');
-      renderTasks(main, {
+      runView(renderTasks, main, {
         mode,
         title: isAdmin && mode === 'all' ? 'Oversight' : 'My Tasks',
         projectId: params.get('project') || '',
+        due: params.get('due') || '',
         overdue: params.get('overdue') || '',
       });
       break;
@@ -77,17 +101,18 @@ function route() {
     case 'all': {
       if (!isAdmin) { window.location.hash = '#/tasks'; return; }
       shell.renderNav('all');
-      renderTasks(main, {
+      runView(renderTasks, main, {
         mode: 'all',
         title: 'Oversight — all tasks',
         projectId: params.get('project') || '',
+        due: params.get('due') || '',
         overdue: params.get('overdue') || '',
       });
       break;
     }
     case 'projects': {
       shell.renderNav('projects');
-      renderProjects(main);
+      runView(renderProjects, main);
       break;
     }
     case 'messages': {
@@ -98,7 +123,7 @@ function route() {
     case 'users': {
       if (!isAdmin) { window.location.hash = '#/home'; return; }
       shell.renderNav('users');
-      renderUsers(main);
+      runView(renderUsers, main);
       break;
     }
     default:
@@ -119,7 +144,9 @@ async function start() {
   on('task-updated', () => { if (store.user && shell && !isOpen()) route(); });
   on('data-changed', async () => {
     if (!store.user || !shell) return;
-    await loadCaches();
+    // A cache refresh failure must not become an unhandled rejection; the view
+    // is re-rendered with whatever is cached.
+    try { await loadCaches(); } catch (err) { /* keep the stale cache */ }
     route();
   });
   on('logged-out', () => showLogin());

@@ -1,9 +1,12 @@
-// Messages — 1:1 chat between any two users, with near-real-time polling.
+// Messages — 1:1 chat between any two active accounts (Admin ↔ Employee or
+// Employee ↔ Employee), with near-real-time polling.
 
 import { api } from '../api.js';
 import { store } from '../store.js';
 import { icon, avatar, spinner, emptyState, toast } from '../components.js';
-import { esc, timeAgo, fmtDateTime } from '../util.js';
+import { esc, timeAgo, fmtDateTime, roleLabel } from '../util.js';
+
+const PAGE_TITLE = 'Task Management · Cosmic Info Solutions';
 
 export function renderMessages(main, opts = {}) {
   const me = store.user.id;
@@ -71,7 +74,7 @@ export function renderMessages(main, opts = {}) {
   function renderConvos() {
     convoList.dataset.rendered = '1';
     const unreadTotal = state.conversations.reduce((n, c) => n + c.unread, 0);
-    document.title = unreadTotal ? '(' + unreadTotal + ') TaskFlow' : 'TaskFlow';
+    document.title = unreadTotal ? '(' + unreadTotal + ') ' + PAGE_TITLE : PAGE_TITLE;
 
     if (!state.conversations.length) {
       convoList.innerHTML = emptyState('chat', 'No conversations yet',
@@ -105,9 +108,14 @@ export function renderMessages(main, opts = {}) {
     state.selectedId = userId;
     state.lastThreadSig = '';
     state.threadBottom = true;
-    window.location.hash = '#/messages/' + encodeURIComponent(userId);
-    renderConvos();
+    // Only rewrite the hash when it actually differs, otherwise selecting the
+    // same person would be a no-op route change (or, on a deep link, would
+    // re-enter the router needlessly).
+    const nextHash = '#/messages/' + encodeURIComponent(userId);
+    if (window.location.hash !== nextHash) window.location.hash = nextHash;
     threadPane.classList.add('show');
+    if (state.conversations.length) renderConvos();
+    else convoList.innerHTML = spinner();
     threadInner.innerHTML = spinner();
     await refreshThread();
     loadInbox(true);
@@ -156,7 +164,9 @@ export function renderMessages(main, opts = {}) {
       '<button type="button" class="icon-btn back-btn" id="thread-back">' + icon('chevL', 20) + '</button>' +
       avatar(other, 34) +
       '<div><strong>' + esc(other.displayName || other.username) + '</strong>' +
-        '<div><span>' + esc(other.role) + ' · @' + esc(other.username) + '</span></div>' +
+        '<div><span>' + esc(roleLabel(other.role)) +
+          (other.designation ? ' · ' + esc(other.designation) : '') +
+          ' · @' + esc(other.username) + '</span></div>' +
       '</div>' +
     '</div>';
 
@@ -238,14 +248,17 @@ export function renderMessages(main, opts = {}) {
     if (state.selectedId) refreshThread();
   }, 3000);
 
-  loadInbox(false);
-  if (state.selectedId) selectConversation(state.selectedId);
+  // A deep link (#/messages/<id>) selects the conversation only after the inbox
+  // has arrived, so the conversation list is never painted before its data.
+  loadInbox(false).then(() => {
+    if (state.selectedId) selectConversation(state.selectedId);
+  });
 
   return {
     clean() {
       clearInterval(inboxTimer);
       clearInterval(threadTimer);
-      document.title = 'TaskFlow';
+      document.title = PAGE_TITLE;
     },
   };
 }

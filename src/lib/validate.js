@@ -6,9 +6,13 @@ const db = require('../db');
 
 const STATUS_ORDER = ['not_started', 'in_progress', 'on_hold', 'completed'];
 const ALLOWED_STATUSES = new Set(STATUS_ORDER);
-const PRIORITY = ['low', 'medium', 'high'];
+
+// Display / sort order: most urgent first.
+const PRIORITY = ['critical', 'high', 'medium', 'low'];
 const PRIORITY_SET = new Set(PRIORITY);
-const ROLES = new Set(['admin', 'analyst']);
+const PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+
+const ROLES = new Set(['admin', 'employee']);
 
 // Strip control characters and trim. `maxLen` imposes a hard cap.
 function cleanString(value, maxLen, options = {}) {
@@ -30,18 +34,58 @@ function isStatus(value) { return ALLOWED_STATUSES.has(value); }
 function isPriority(value) { return PRIORITY_SET.has(value); }
 function isBoolean(value) { return value === true || value === false; }
 
+// A deliberately permissive e-mail check: one "@", a dot in the domain, no
+// spaces. The value is never used to build a URL, only displayed and mailed.
+const EMAIL_RE = /^[^\s@,;:<>()[\]\\]+@[^\s@,;:<>()[\]\\]+\.[A-Za-z0-9-]{2,}$/;
+function cleanEmail(value, maxLen = 120) {
+  const email = cleanString(value, maxLen).toLowerCase();
+  return EMAIL_RE.test(email) ? email : '';
+}
+function isEmail(value) {
+  return typeof value === 'string' && cleanEmail(value) === value.trim().toLowerCase();
+}
+
 // Accepts undefined/null/'' → null, or a 'YYYY-MM-DD' string.
 function isoDateOnly(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'string') return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const d = new Date(value + 'T00:00:00Z');
-  return Number.isNaN(d.getTime()) ? null : value;
+  if (Number.isNaN(d.getTime())) return null;
+  // Reject impossible calendar dates such as 2026-02-31 (which JS would roll
+  // over into March instead of failing).
+  if (d.toISOString().slice(0, 10) !== value) return null;
+  return value;
 }
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+
+// ---------------------------------------------------------------------------
+// Overdue engine
+//
+// A task is Overdue when its due date is strictly in the past AND it is not
+// Completed. "Overdue" is a derived flag, never a stored status, so a task
+// stops being overdue the moment it is completed — with no data migration.
+// ---------------------------------------------------------------------------
+function isOverdue(task, today) {
+  if (!task || !task.dueDate) return false;
+  if (task.status === 'completed') return false;
+  return task.dueDate < (today || todayISO());
+}
+
+function isDueToday(task, today) {
+  if (!task || !task.dueDate) return false;
+  // Same "unfinished only" rule as Overdue: a task completed today is not work
+  // that is still due, so it must not be highlighted or counted.
+  if (task.status === 'completed') return false;
+  return task.dueDate === (today || todayISO());
+}
+
+// The four canonical statuses a task can hold.
+const TASK_STATUSES = STATUS_ORDER;
+const TASK_PRIORITIES = PRIORITY;
 
 function validHexColor(value) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
@@ -66,36 +110,81 @@ function sanitizeSubtasks(value) {
   return out.slice(0, 100);
 }
 
-// Task access rule: admins see everything; analysts only their own assigned tasks.
-function canAccessTask(user, task) {
-  if (!user || !task) return false;
-  if (user.role === 'admin') return true;
-  return task.assigneeId === user.id;
-}
+// ---------------------------------------------------------------------------
+// Access control (server-side, authoritative — the UI never decides this)
+// ---------------------------------------------------------------------------
 
-// Project access rule: admins see everything; analysts only listed members.
+// Project access rule: admins see everything; employees only listed members.
 function canAccessProject(user, project) {
   if (!user || !project) return false;
   if (user.role === 'admin') return true;
   return Array.isArray(project.memberIds) && project.memberIds.includes(user.id);
 }
 
-// The task list an analyst is allowed to see (used by /tasks and /search).
+// Task access rule: admins see everything. An employee may reach a task when
+// either (a) it is assigned to them, or (b) it belongs to a project they are an
+// explicit member of. Everything else is invisible to them.
+function canAccessTask(user, task) {
+  if (!user || !task) return false;
+  if (user.role === 'admin') return true;
+  if (task.assigneeId && task.assigneeId === user.id) return true;
+  if (task.projectId) {
+    const project = db.get('projects', task.projectId);
+    if (project && canAccessProject(user, project)) return true;
+  }
+  return false;
+}
+
+// Every task the user is allowed to see (used by /tasks, /search, /stats).
 function scopedTaskList(user) {
   const all = db.all('tasks');
   if (user.role === 'admin') return all.slice();
-  return all.filter((t) => t.assigneeId === user.id);
+  return all.filter((t) => canAccessTask(user, t));
+}
+
+// Only the tasks actually assigned to the user — the "My Tasks" scope, which
+// stays narrow even for an admin who is also a member of many projects.
+function assignedTaskList(user) {
+  return db.filter('tasks', (t) => t.assigneeId === user.id);
+}
+
+// Accounts that have been deactivated cannot sign in and lose their sessions.
+function isActiveUser(user) {
+  return !!user && user.active !== false;
 }
 
 // Public shape of a user — never leaks the password hash.
 function publicUser(user) {
   if (!user) return null;
+  const name = user.displayName || user.username;
   return {
     id: user.id,
     username: user.username,
-    displayName: user.displayName || user.username,
+    // `name` is the canonical label used by the UI; `displayName` is kept for
+    // backwards compatibility with any existing client code.
+    name,
+    displayName: name,
+    email: user.email || '',
+    department: user.department || '',
+    designation: user.designation || '',
     role: user.role,
+    active: user.active !== false,
     createdAt: user.createdAt,
+    updatedAt: user.updatedAt || null,
+    lastLoginAt: user.lastLoginAt || null,
+  };
+}
+
+// A compact actor projection for audit entries (never any credential material).
+function publicActor(user) {
+  if (!user) return { id: null, name: 'System', displayName: 'System', username: null, role: null };
+  const name = user.displayName || user.username;
+  return {
+    id: user.id,
+    name,
+    displayName: name,
+    username: user.username,
+    role: user.role,
   };
 }
 
@@ -107,8 +196,14 @@ function fail(res, status, message, code) {
 module.exports = {
   STATUS_ORDER,
   ALLOWED_STATUSES,
+  TASK_STATUSES,
+  TASK_PRIORITIES,
   PRIORITY,
+  PRIORITY_RANK,
+  ROLES,
   cleanString,
+  cleanEmail,
+  isEmail,
   isUsername,
   isPassword,
   isRole,
@@ -117,11 +212,16 @@ module.exports = {
   isBoolean,
   isoDateOnly,
   todayISO,
+  isOverdue,
+  isDueToday,
   validHexColor,
   sanitizeSubtasks,
   canAccessTask,
   canAccessProject,
   scopedTaskList,
+  assignedTaskList,
+  isActiveUser,
   publicUser,
+  publicActor,
   fail,
 };

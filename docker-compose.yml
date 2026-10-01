@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+#  Cosmic Info Solutions — Task Management
+#  Production compose stack: the Node app behind Nginx.
+#
+#      cp .env.example .env      # then edit it (SESSION_SECRET is mandatory)
+#      docker compose up -d --build
+#
+#  Publishes https://tasks.cosmicinfosolutions.com only. The Node port is never
+#  exposed to the host, so the app is reachable exclusively through the proxy.
+# ---------------------------------------------------------------------------
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cosmic-tasks:latest
+    container_name: cosmic-tasks-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "4321"
+      HOST: 0.0.0.0
+      DATA_DIR: /app/data
+      UPLOAD_DIR: /app/uploads
+      # One Nginx in front of the app.
+      TRUST_PROXY_HOPS: "1"
+    volumes:
+      # Persistent state. The JSON database and uploaded attachments must
+      # survive container rebuilds.
+      - app-data:/app/data
+      - app-uploads:/app/uploads
+    expose:
+      - "4321"
+    healthcheck:
+      # The proxy waits for this, and it is also what `depends_on` gates on, so
+      # Nginx never starts against a process that cannot answer yet.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4321/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - cosmic-internal
+    # No privileged capabilities are needed for this workload.
+    security_opt:
+      - no-new-privileges:true
+
+  proxy:
+    image: nginx:1.27-alpine
+    container_name: cosmic-tasks-proxy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/tasks.cosmicinfosolutions.com.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/certbot/conf:/etc/letsencrypt:ro
+      - ./deploy/certbot/www:/var/www/certbot:ro
+    networks:
+      - cosmic-internal
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  app-data:
+  app-uploads:
+
+networks:
+  # A private bridge network: only the proxy is attached to the outside world,
+  # so the Node port is unreachable from the host or the internet. It is not an
+  # `internal: true` network because the app needs outbound access for SMTP
+  # password-reset notifications.
+  cosmic-internal:
+    driver: bridge

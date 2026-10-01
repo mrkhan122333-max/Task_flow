@@ -1,14 +1,18 @@
 {
-  "name": "taskflow",
+  "name": "cosmic-tasks",
   "version": "1.0.0",
   "private": true,
-  "description": "TaskFlow — an Asana-style project management tool for Cosmic Info Solutions",
+  "description": "Cosmic Info Solutions Task Management — task assignment, tracking, deadlines and audit history",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "serve": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node scripts/seed.js",
-    "check": "node scripts/lint.js"
+    "check": "node scripts/lint.js",
+    "docker:up": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f",
+    "docker:down": "docker compose down"
   },
   "engines": {
     "node": ">=18"

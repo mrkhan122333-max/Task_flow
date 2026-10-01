@@ -10,8 +10,10 @@ const express = require('express');
 const crypto = require('crypto');
 const db = require('../db');
 const config = require('../config');
+const activity = require('../lib/activity');
 const { cleanString, canAccessTask, fail } = require('../lib/validate');
 const { authRequired } = require('../middleware/auth');
+const { requireTaskAccess } = require('../middleware/rbac');
 const { singleFile, allowedExtension, sanitizeOriginalName, magicMatches, kindFor } = require('../middleware/uploads');
 
 const router = express.Router();
@@ -118,19 +120,19 @@ router.post('/upload', authRequired, singleFile, (req, res, next) => {
       taskId: target.taskId,
       commentId: target.commentId,
     });
+    if (target.taskId) {
+      const task = db.get('tasks', target.taskId);
+      if (task) activity.logFile(task, file, req.user.id);
+    }
     return res.status(201).json({ file: publicFile(file) });
   } catch (err) {
     return next(err);
   }
 });
 
-// List files attached to a task (assignee or admin only).
-router.get('/tasks/:id/files', authRequired, (req, res) => {
-  const task = db.get('tasks', req.params.id);
-  if (!task || !canAccessTask(req.user, task)) {
-    return fail(res, 404, 'Task not found.');
-  }
-  const files = db.filter('files', (f) => f.taskId === task.id)
+// List files attached to a task (caller must be able to reach the task).
+router.get('/tasks/:id/files', authRequired, requireTaskAccess(), (req, res) => {
+  const files = db.filter('files', (f) => f.taskId === req.task.id)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .map(publicFile);
   return res.json({ files });
@@ -161,7 +163,23 @@ router.delete('/files/:id', authRequired, (req, res) => {
   if (req.user.role !== 'admin' && file.uploadedById !== req.user.id) {
     return fail(res, 403, 'You can only delete files you uploaded.');
   }
+  // Re-check task access so an employee cannot remove an attachment from a
+  // task they lost access to (e.g. removed from the project).
+  const task = file.taskId ? db.get('tasks', file.taskId) : null;
+  if (task && !canAccessTask(req.user, task)) {
+    return fail(res, 404, 'File not found.');
+  }
+  const taskId = file.taskId;
   deleteFileRecord(file);
+  if (taskId) {
+    const parent = db.get('tasks', taskId);
+    if (parent) {
+      activity.append(parent.id, req.user.id, activity.EVENT.FILE, {
+        field: null,
+        meta: { name: file.originalName, removed: true },
+      });
+    }
+  }
   return res.json({ ok: true });
 });
 

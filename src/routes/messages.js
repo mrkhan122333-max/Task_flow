@@ -4,12 +4,14 @@
 
 const express = require('express');
 const db = require('../db');
-const { cleanString, publicUser, fail } = require('../lib/validate');
+const { cleanString, isActiveUser, publicUser, fail } = require('../lib/validate');
 const { authRequired } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Conversation list: every other user, plus the last message + unread count.
+// Conversation list: every other active user, plus the last message + unread
+// count. Deactivated accounts disappear from the list, although their existing
+// message history is preserved.
 router.get('/inbox', authRequired, (req, res) => {
   const me = req.user.id;
   const allMessages = db.all('messages');
@@ -17,6 +19,7 @@ router.get('/inbox', authRequired, (req, res) => {
 
   for (const user of db.all('users')) {
     if (user.id === me) continue;
+    if (!isActiveUser(user)) continue;
     const msgs = allMessages.filter((m) =>
       (m.fromId === me && m.toId === user.id) || (m.fromId === user.id && m.toId === me));
     msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -29,7 +32,7 @@ router.get('/inbox', authRequired, (req, res) => {
     if (a.last && b.last) return a.last.createdAt < b.last.createdAt ? 1 : -1;
     if (a.last) return -1;
     if (b.last) return 1;
-    return a.user.displayName.localeCompare(b.user.displayName);
+    return String(a.user.displayName || '').localeCompare(String(b.user.displayName || ''));
   });
 
   return res.json({ conversations });
@@ -47,11 +50,12 @@ router.get('/conversations/:userId', authRequired, (req, res) => {
   return res.json({ other: publicUser(other), messages });
 });
 
-// Send a message to any other user (Admin ↔ Analyst, Analyst ↔ Analyst).
+// Send a message to any other active user (Admin ↔ Employee, Employee ↔ Employee).
 router.post('/messages', authRequired, (req, res) => {
   const toId = req.body && req.body.toId ? String(req.body.toId) : '';
   const recipient = db.get('users', toId);
   if (!recipient) return fail(res, 404, 'Recipient does not exist.');
+  if (!isActiveUser(recipient)) return fail(res, 400, 'That account has been deactivated.');
   if (toId === req.user.id) return fail(res, 400, 'You cannot message yourself.');
 
   const text = cleanString(req.body && req.body.text, 2000, { allowNewlines: true });
@@ -71,14 +75,15 @@ router.post('/conversations/:userId/read', authRequired, (req, res) => {
   const other = db.get('users', req.params.userId);
   if (!other) return fail(res, 404, 'User not found.');
   const me = req.user.id;
+  const pending = db.filter('messages', (m) => m.fromId === other.id && m.toId === me && !m.read);
   let updated = 0;
-  db.replace('messages', db.all('messages').map((m) => {
-    if (m.fromId === other.id && m.toId === me && !m.read) {
-      updated += 1;
-      return Object.assign({}, m, { read: true });
-    }
-    return m;
-  }));
+  if (pending.length) {
+    const pendingIds = new Set(pending.map((m) => m.id));
+    db.replace('messages', db.all('messages').map((m) => (
+      pendingIds.has(m.id) ? Object.assign({}, m, { read: true }) : m
+    )));
+    updated = pending.length;
+  }
   return res.json({ ok: true, updated });
 });
 

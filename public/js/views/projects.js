@@ -31,7 +31,9 @@ export async function renderProjects(main) {
       '<div class="page-head">' +
         '<div>' +
           '<h1>Projects</h1>' +
-          '<div class="page-sub">' + esc('Manage the work your analysts are assigned to') + '</div>' +
+          '<div class="page-sub">' + esc(isAdmin
+            ? 'Group work and control which employees can see it'
+            : 'The projects you are a member of, plus your own assigned work') + '</div>' +
         '</div>' +
         (isAdmin
           ? '<div class="page-actions">' +
@@ -113,22 +115,24 @@ export async function renderProjects(main) {
     const swatches = COLORS.map((c) =>
       '<button type="button" data-color="' + c + '" class="swatch' + ((project && project.color === c) ? ' active' : '') + '"' +
       ' style="background:' + c + '"></button>').join('');
-    const analysts = store.users.filter((u) => u.role === 'analyst');
-    const memberField = analysts.length
-      ? '<select class="input" name="memberIds" multiple size="' + Math.min(analysts.length, 6) + '">' +
-          analysts.map((u) => '<option value="' + esc(u.id) + '"' +
+    const employees = store.users.filter((u) => u.role === 'employee' && u.active !== false);
+    const memberField = employees.length
+      ? '<select class="input" name="memberIds" multiple size="' + Math.min(employees.length, 6) + '">' +
+          employees.map((u) => '<option value="' + esc(u.id) + '"' +
             ((project && project.memberIds && project.memberIds.includes(u.id)) ? ' selected' : '') + '>' +
-            esc(u.displayName || u.username) + '</option>').join('') +
+            esc(u.displayName || u.username) +
+            (u.department ? ' — ' + esc(u.department) : '') + '</option>').join('') +
         '</select>'
-      : '<p class="muted">No analysts yet — add users via Manage Users.</p>';
+      : '<p class="muted">No employees yet — add them via Manage Users.</p>';
     const body = document.createElement('div');
     body.innerHTML =
       '<form id="' + formId + '" novalidate>' +
         '<div class="field"><label>Project name *</label><input class="input" name="name" maxlength="100" value="' + esc(project ? project.name : '') + '"></div>' +
         '<div class="field"><label>Description</label><textarea class="input" name="description" maxlength="1000" rows="2">' + esc(project ? project.description : '') + '</textarea></div>' +
         '<div class="field"><label>Color</label><div class="chip-list" data-swatches>' + swatches + '</div></div>' +
-        '<div class="field"><label>Analysts</label>' + memberField +
-          '<div class="hint">Only the analysts you pick here can see this project. Hold Ctrl/Cmd to select several. Admins always have access.</div></div>' +
+        '<div class="field"><label>Employees</label>' + memberField +
+          '<div class="hint">Members can open every task in this project. Employees who are not listed can still ' +
+          'see tasks assigned directly to them. Admins always have access.</div></div>' +
       '</form>';
     body.addEventListener('click', (e) => {
       const sw = e.target.closest('.swatch');

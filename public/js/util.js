@@ -10,12 +10,24 @@ export const STATUS_META = {
   completed:   { label: 'Completed',   color: '#059669', bg: '#e4f7f0', short: 'CO' },
 };
 
-// Priority labels/colors (object key order = display order: High → Low).
+// Priority labels/colors. Key order is the display order: Critical → Low.
 export const PRIORITY_META = {
-  high:   { label: 'High',   color: '#dc2626', bg: '#fee2e2' },
-  medium: { label: 'Medium', color: '#d97706', bg: '#fef3c7' },
-  low:    { label: 'Low',    color: '#64748b', bg: '#e2e8f0' },
+  critical: { label: 'Critical', color: '#b91c1c', bg: '#fee2e2' },
+  high:     { label: 'High',     color: '#dc2626', bg: '#ffe4e6' },
+  medium:   { label: 'Medium',   color: '#d97706', bg: '#fef3c7' },
+  low:      { label: 'Low',      color: '#64748b', bg: '#e2e8f0' },
 };
+
+export const ROLES = ['admin', 'employee'];
+
+export const ROLE_META = {
+  admin:    { label: 'Admin',    plural: 'Admins',    color: '#7c3aed', bg: '#ede9fe' },
+  employee: { label: 'Employee', plural: 'Employees', color: '#0891b2', bg: '#cffafe' },
+};
+
+export function roleLabel(role) {
+  return (ROLE_META[role] || { label: 'Employee' }).label;
+}
 
 export function esc(value) {
   if (value === null || value === undefined) return '';
@@ -34,7 +46,7 @@ export function fmtDate(iso) {
   const d = m
     ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
     : new Date(s);
-  if (Number.isNaN(d.getTime())) return esc(s);
+  if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -67,8 +79,51 @@ export function todayISO() {
   return d.getFullYear() + '-' + mm + '-' + dd;
 }
 
+// Overdue is derived, never stored: any unfinished task whose due date is
+// strictly before today. Completed tasks are never overdue.
 export function isOverdue(task) {
-  return !!(task.dueDate && task.dueDate < todayISO() && task.status !== 'completed');
+  return !!(task && task.dueDate && task.dueDate < todayISO() && task.status !== 'completed');
+}
+
+export function isDueToday(task) {
+  return !!(task && task.dueDate && task.dueDate === todayISO() && task.status !== 'completed');
+}
+
+// The API already computes these flags in the server's timezone. Trust them when
+// present so a browser in a different timezone can never disagree with the
+// filter that produced the list; the local calculation is only a fallback for
+// objects that have not been augmented by the server.
+export function taskIsOverdue(task) {
+  if (!task) return false;
+  if (typeof task.overdue === 'boolean') return task.overdue;
+  return isOverdue(task);
+}
+
+export function taskIsDueToday(task) {
+  if (!task) return false;
+  if (typeof task.dueToday === 'boolean') return task.dueToday;
+  return isDueToday(task);
+}
+
+// "Overdue by 3 days" / "Due today" / "Due in 2 days" / "Completed 4 days ago".
+export function dueLabel(task) {
+  if (!task || !task.dueDate) return '';
+  const today = todayISO();
+  if (task.status === 'completed') {
+    const done = task.completedAt ? String(task.completedAt).slice(0, 10) : today;
+    return 'Completed ' + relativeDays(done, today);
+  }
+  if (task.dueDate < today) return 'Overdue by ' + relativeDays(task.dueDate, today);
+  if (task.dueDate === today) return 'Due today';
+  return 'Due in ' + relativeDays(today, task.dueDate);
+}
+
+function relativeDays(fromISO, toISO) {
+  const from = Date.parse(fromISO + 'T00:00:00Z');
+  const to = Date.parse(toISO + 'T00:00:00Z');
+  if (Number.isNaN(from) || Number.isNaN(to)) return '';
+  const days = Math.round(Math.abs(to - from) / 86400000);
+  return days === 0 ? 'today' : days + (days === 1 ? ' day' : ' days');
 }
 
 export function debounce(fn, ms) {

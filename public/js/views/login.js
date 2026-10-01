@@ -8,11 +8,11 @@ export function renderLogin(root, opts = {}) {
     '<div class="auth-page">' +
       '<div class="auth-card">' +
         '<div class="auth-brand">' +
-          '<span class="brand-mark">TF</span>' +
-          '<span class="brand-name">TaskFlow</span>' +
+          '<span class="brand-mark">✓</span>' +
+          '<span class="brand-name">Cosmic Info Solutions</span>' +
         '</div>' +
-        '<h1>Welcome back</h1>' +
-        '<p class="auth-sub">Sign in to your Cosmic Info Solutions workspace</p>' +
+        '<h1>Task Management</h1>' +
+        '<p class="auth-sub">Sign in to manage your team&rsquo;s tasks</p>' +
         '<form id="login-form" novalidate>' +
           '<div class="field"><label>Username</label>' +
             '<input class="input" id="login-user" name="username" autocomplete="username" maxlength="64" autofocus required></div>' +
@@ -50,7 +50,7 @@ export function renderLogin(root, opts = {}) {
       else window.location.hash = '#/';
     } catch (err) {
       if (err.code === 'NO_USERS') {
-        showError('No accounts exist yet. An administrator must run `npm run seed` to create the first admin account.');
+        showError('No accounts exist yet. An administrator must run `npm run seed` on the server to create the first Admin account.');
       } else {
         showError(err.message || 'Login failed. Please try again.');
       }

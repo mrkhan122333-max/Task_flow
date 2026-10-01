@@ -1,6 +1,7 @@
 /* =========================================================================
-   TaskFlow — application stylesheet
-   Blue & purple gradient branding, modern SaaS aesthetic, fully responsive.
+   Cosmic Info Solutions — Task Management
+   Application stylesheet. Blue & purple gradient branding, modern SaaS
+   aesthetic, fully responsive.
    ========================================================================= */
 
 :root {
@@ -33,6 +34,7 @@
   --shadow-lg: 0 12px 32px rgba(16, 24, 40, .16);
 
   --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   --sidebar-w: 248px;
   --topbar-h: 60px;
@@ -156,6 +158,8 @@ label.check input { margin-top: 3px; accent-color: var(--c-purple); }
   letter-spacing: .5px;
 }
 .brand-name { font-size: 20px; font-weight: 800; background: linear-gradient(135deg, var(--c-blue), var(--c-purple)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand-org { display: block; font-size: 11.5px; font-weight: 600; color: var(--c-faint); letter-spacing: .02em; }
+.sidebar-head .auth-brand { align-items: center; min-width: 0; }
 .auth-card h1 { font-size: 21px; margin-bottom: 4px; }
 .auth-sub { color: var(--c-muted); margin-bottom: 24px; font-size: 14px; }
 .auth-foot { margin-top: 22px; font-size: 12px; color: var(--c-faint); text-align: center; }
@@ -329,6 +333,7 @@ label.check input { margin-top: 3px; accent-color: var(--c-purple); }
 .mini-card .mc-meta { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .mini-card .mc-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--c-muted); }
 .mini-card .mc-chip.overdue { color: var(--c-red); font-weight: 600; }
+.mini-card .mc-chip.today { color: var(--c-amber); font-weight: 600; }
 .mini-card .mc-foot { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
 .mini-card .mc-foot .avatar { margin-left: auto; }
 
@@ -463,6 +468,26 @@ label.check input { margin-top: 3px; accent-color: var(--c-purple); }
 .user-table tbody tr:last-child { border-bottom: none; }
 .user-table td { padding: 12px 16px; vertical-align: middle; }
 .user-main { display: flex; align-items: center; gap: 11px; }
+/* A deactivated employee keeps their row (and their history) but is visually
+   stepped back so it is obvious they cannot be assigned work or sign in. */
+.user-table tbody tr.row-inactive { background: var(--c-surface-2); color: var(--c-faint); }
+.user-table tbody tr.row-inactive .user-main > div { opacity: .65; }
+.user-table tbody tr.row-inactive .avatar { filter: grayscale(1); opacity: .6; }
+
+/* ---------- Audit trail (task activity history) ---------- */
+.activity-box { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 10px; padding: 4px 14px; }
+.activity-list { list-style: none; margin: 0; padding: 0; }
+.activity-row { display: flex; gap: 11px; padding: 11px 0; border-bottom: 1px dashed var(--c-border); }
+.activity-row:last-child { border-bottom: none; }
+.activity-ic {
+  flex: none; width: 26px; height: 26px; border-radius: 8px; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--grad-soft); color: var(--c-purple);
+  margin-top: 1px;
+}
+.activity-body { min-width: 0; flex: 1; }
+.activity-line { font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.activity-line strong { font-weight: 700; }
+.activity-time { font-size: 11.5px; margin-top: 2px; }
 
 /* ---------- Modal ---------- */
 .modal-overlay {
@@ -524,6 +549,7 @@ label.check input { margin-top: 3px; accent-color: var(--c-purple); }
 }
 
 @media (max-width: 860px) {
+  .user-table thead th, .user-table td { padding: 10px 12px; }
   .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 700; margin-left: calc(-1 * var(--sidebar-w) - 12px); }
   .sidebar.open { margin-left: 0; box-shadow: var(--shadow-lg); }
   .sidebar-backdrop.show { display: block; position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 650; }

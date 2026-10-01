@@ -6,7 +6,7 @@ import { store, userById, projectById } from './store.js';
 import { emit } from './store.js';
 import {
   esc, STATUS, STATUS_META, PRIORITY_META, uid, avatarGradient, initials, fmtDate,
-  isOverdue,
+  fmtDateTime, isOverdue, dueLabel, roleLabel,
 } from './util.js';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,8 @@ const ICONS = {
   clipboard: '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
   list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
   briefcase: '<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  history: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>',
 };
 
 export function icon(name, size = 18) {
@@ -212,17 +214,21 @@ export function subtaskInfo(task) {
   return { subs, done, pct };
 }
 
+// Due-date chip. Overdue and due-today are derived from the date and the
+// status, so they can never go stale in stored data.
 function dueChip(task) {
   if (!task.dueDate) return '';
   const overdue = isOverdue(task);
-  const cls = overdue ? 'mc-chip overdue' : 'mc-chip';
+  const dueToday = task.dueDate && !overdue && task.status !== 'completed' && dueLabel(task) === 'Due today';
+  const cls = overdue ? 'mc-chip overdue' : (dueToday ? 'mc-chip today' : 'mc-chip');
   const ic = overdue ? 'alert' : 'calendar';
-  return '<span class="' + cls + '">' + icon(ic, 13) + ' ' + esc(fmtDate(task.dueDate)) + '</span>';
+  return '<span class="' + cls + '" title="' + esc(dueLabel(task)) + '">' +
+    icon(ic, 13) + ' ' + esc(fmtDate(task.dueDate)) + '</span>';
 }
 
 // Resolve the project chip data for a task. Tasks carry a read-only projection
 // (projectName/projectColor) added server-side, so the chip still renders when
-// the viewing analyst is not a member of the task's project. Fall back to the
+// the viewing employee is not a member of the task's project. Fall back to the
 // scoped project cache for older payloads and admin callers.
 export function projectInfo(task) {
   if (!task || !task.projectId) return null;
@@ -295,21 +301,25 @@ export function taskRow(task) {
 // Task create/edit form (admin)
 // ---------------------------------------------------------------------------
 
-// Builds the innerHTML for the Assignee <select>. When a project is selected,
-// only analysts listed in that project's memberIds are offered ("Unassigned" is
-// always available). `selectedId` is force-included so an existing assignment is
-// never silently dropped during an edit.
+// Builds the innerHTML for the Assignee <select>. Only active employees can be
+// assigned. When a project is selected, only the employees listed in that
+// project's memberIds are offered ("Unassigned" is always available).
+// `selectedId` is force-included so an existing assignment is never silently
+// dropped during an edit.
 function assigneeOptionsFor(projectId, selectedId) {
   const project = projectId ? store.projects.find((p) => p.id === projectId) : null;
   const members = project ? new Set(project.memberIds || []) : null;
-  const users = store.users.filter((u) => u.role === 'analyst' && (!members || members.has(u.id)));
+  const users = store.users.filter((u) =>
+    u.role === 'employee' && u.active !== false && (!members || members.has(u.id)));
   if (selectedId && !users.some((u) => u.id === selectedId)) {
     const current = store.users.find((u) => u.id === selectedId);
     if (current) users.unshift(current);
   }
   return '<option value="">Unassigned</option>' + users.map((x) =>
     '<option value="' + esc(x.id) + '"' + (x.id === selectedId ? ' selected' : '') + '>' +
-      esc(x.displayName || x.username) + ' (' + esc(x.role) + ')</option>').join('');
+      esc(x.displayName || x.username) +
+      (x.department ? ' — ' + esc(x.department) : '') +
+      (x.active === false ? ' (inactive)' : '') + '</option>').join('');
 }
 
 export function taskFormModal(task, preset = {}, onSaved = null) {
@@ -434,4 +444,103 @@ export function uploadFileToTask(taskId, file) {
   fd.append('taskId', taskId);
   fd.append('file', file);
   return api.upload('/api/upload', fd);
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail (append-only task history)
+// ---------------------------------------------------------------------------
+
+// Human-readable wording for one audit entry. Everything user-supplied is
+// escaped by the caller.
+export function activitySentence(entry) {
+  const who = entry.actor ? (entry.actor.displayName || entry.actor.username) : 'System';
+  const meta = entry.meta || {};
+  const removed = meta.removed === true;
+  const nameOf = (id) => {
+    const u = userById(id);
+    return u ? (u.displayName || u.username) : 'Unassigned';
+  };
+  const statusLabel = (v) => (v ? (STATUS_META[v] || { label: v }).label : '—');
+  const priorityLabel = (v) => (v ? (PRIORITY_META[v] || { label: v }).label : '—');
+  const dateLabel = (v) => (v ? fmtDate(v) : '—');
+  const projectLabel = (v) => (v ? ((projectById(v) || {}).name || 'another project') : 'no project');
+
+  switch (entry.type) {
+    case 'created':
+      return 'created this task' + (meta.title ? ' — “' + meta.title + '”' : '');
+    case 'assigned':
+      return removed ? 'unassigned the task' : 'assigned it to ' + nameOf(entry.to);
+    case 'status':
+      return 'changed status from ' + statusLabel(entry.from) + ' to ' + statusLabel(entry.to) +
+        (meta.completedAt ? ' (completed ' + fmtDateTime(meta.completedAt) + ')' : '');
+    case 'priority':
+      return 'changed priority from ' + priorityLabel(entry.from) + ' to ' + priorityLabel(entry.to);
+    case 'due_date':
+      return 'changed the due date from ' + dateLabel(entry.from) + ' to ' + dateLabel(entry.to);
+    case 'start_date':
+      return 'changed the start date from ' + dateLabel(entry.from) + ' to ' + dateLabel(entry.to);
+    case 'project':
+      // A project deletion records the same event with `meta.removed` set.
+      if (meta.removed) {
+        return 'removed the task from ' + ((entry.from && (projectById(entry.from) || {}).name) || meta.projectName || 'a deleted project');
+      }
+      return 'moved the task from ' + projectLabel(entry.from) + ' to ' + projectLabel(entry.to);
+    case 'title':
+      return 'renamed the task from “' + (entry.from || '—') + '” to “' + (entry.to || '—') + '”';
+    case 'description':
+      return 'updated the description';
+    case 'subtask': {
+      // The server records an add (from=null, to=text), a removal
+      // (meta.removed, from=text) and a checkbox toggle (from/to = open|done).
+      const label = entry.to || entry.from || meta.text || '';
+      if (meta.removed) return 'removed the subtask' + (label ? ' “' + label + '”' : '');
+      if (entry.from === 'done' || entry.to === 'done') {
+        return (entry.to === 'done' ? 'completed' : 'reopened') +
+          ' the subtask' + (label ? ' “' + label + '”' : '');
+      }
+      if (entry.from === 'open' || entry.to === 'open') {
+        return 'reopened the subtask' + (label ? ' “' + label + '”' : '');
+      }
+      return 'added the subtask' + (label ? ' “' + label + '”' : '');
+    }
+    case 'comment':
+      return removed ? 'removed a comment' : 'commented' + (meta.excerpt ? ': “' + meta.excerpt + '”' : '');
+    case 'file':
+      return removed
+        ? 'removed the attachment ' + (meta.name || '')
+        : 'uploaded ' + (meta.name || 'a file');
+    default:
+      return 'updated the task';
+  }
+}
+
+const ACTIVITY_ICONS = {
+  created: 'plus', assigned: 'user', status: 'check', priority: 'alert',
+  due_date: 'calendar', start_date: 'calendar', project: 'folder', title: 'pen',
+  description: 'pen', subtask: 'check', comment: 'comment', file: 'paperclip',
+};
+
+// Renders the audit trail list returned by GET /api/tasks/:id/activity.
+// Newest first, so the most recent change is always at the top.
+export function activityList(entries, { limit = 50 } = {}) {
+  const list = (entries || []).slice().reverse().slice(0, limit);
+  if (!list.length) {
+    return '<p class="muted" style="padding:6px 0">No activity recorded yet.</p>';
+  }
+  return '<ul class="activity-list">' + list.map((entry) => {
+    const actor = entry.actor || null;
+    const when = entry.createdAt;
+    return '<li class="activity-row">' +
+      '<span class="activity-ic">' + icon(ACTIVITY_ICONS[entry.type] || 'clock', 14) + '</span>' +
+      '<div class="activity-body">' +
+        '<div class="activity-line">' +
+          (actor ? '<strong>' + esc(actor.displayName || actor.username) + '</strong> ' : '') +
+          '<span>' + esc(activitySentence(entry)) + '</span>' +
+        '</div>' +
+        '<div class="activity-time muted">' +
+          esc(fmtDateTime(when)) + (actor ? ' · ' + esc(roleLabel(actor.role)) : '') +
+        '</div>' +
+      '</div>' +
+    '</li>';
+  }).join('') + '</ul>';
 }

@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+uploads
+deploy/certbot
+*.log
+*.md
+README.md
+.DS_Store
+.idea
+.vscode
